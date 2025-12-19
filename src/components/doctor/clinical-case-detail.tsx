@@ -288,6 +288,13 @@ export default function ClinicalCaseDetail({
 
   const saveNeuroAssessment = async () => {
     console.log("Iniciando guardado de evaluación...", neuroAssessment);
+
+    if (!user) {
+      alert("Sesión no detectada. Por favor recarga la página.");
+      return;
+    }
+
+    setIsSaving(true);
     try {
       const payload: any = {
         case_id: caseId,
@@ -319,6 +326,7 @@ export default function ClinicalCaseDetail({
 
       console.log("Guardado exitoso:", data);
       alert("Éxito: Evaluación guardada correctamente.");
+      onClose();
 
       // Actualizar estado local si es necesario (ej. capturar ID nuevo)
       if (data && data[0]) {
@@ -327,6 +335,8 @@ export default function ClinicalCaseDetail({
     } catch (error: any) {
       console.error("EXCEPCIÓN al guardar evaluación:", error);
       alert(`Error al guardar: ${error.message || "Ver consola"}`);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -759,7 +769,7 @@ export default function ClinicalCaseDetail({
                     className="w-full rounded-lg border border-slate-600 bg-slate-700 p-3 text-left transition-colors hover:bg-slate-600"
                   >
                     <span className="mb-1 block text-[10px] font-bold uppercase text-slate-400">
-                      Google Gemini 1.5
+                      Google Gemini 2.5
                     </span>
                     <p className="text-xs text-slate-200">
                       {aiOptions.copilot}
@@ -787,10 +797,17 @@ export default function ClinicalCaseDetail({
             </div>
 
             <button
+              type="button"
               onClick={saveNeuroAssessment}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-teal-700 px-6 py-4 font-bold text-white transition-colors hover:bg-teal-800"
+              disabled={isSaving}
+              className={`mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 font-bold text-white transition-colors ${
+                isSaving
+                  ? "bg-teal-800 cursor-not-allowed"
+                  : "bg-teal-700 hover:bg-teal-800"
+              }`}
             >
-              <Save size={20} /> Guardar Evaluación
+              <Save size={20} />{" "}
+              {isSaving ? "Guardando..." : "Guardar y Cerrar Caso"}
             </button>
           </div>
         </Accordion>
