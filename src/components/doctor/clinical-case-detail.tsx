@@ -2,6 +2,11 @@
 
 import { supabase } from "@/lib/supabase";
 import {
+  generateMedicalPrompt,
+  getChatGPTDiagnosis,
+  getGeminiDiagnosis,
+} from "@/services/aiService";
+import {
   GeneralConsultation,
   LabResult,
   MedicalHistory,
@@ -11,22 +16,184 @@ import {
 } from "@/types/medical";
 import {
   Activity,
+  ActivitySquare,
   Brain,
   ChevronDown,
   ChevronUp,
+  ClipboardList,
   FileText,
   FlaskConical,
   Phone,
   Plus,
   Save,
   Sparkles,
+  UserCheck,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import React, { useEffect, useState } from "react";
-import { Accordion, JsonResultsTable } from "./helpers";
-import { useAuth } from "@/context/AuthContext";
+import {
+  FCForm,
+  MMSEForm,
+  MotorAssessmentForm,
+  PBAForm,
+} from "./neurology-tests-forms";
 
-// --- TIPOS DE EXAMENES ---
+// --- SUB-COMPONENTS UI ---
+
+const Accordion = ({
+  title,
+  icon: Icon,
+  isOpen,
+  onToggle,
+  children,
+  color = "#2563eb",
+}: any) => (
+  <div className="mb-3 bg-white rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+    <button
+      onClick={onToggle}
+      className="w-full flex items-center justify-between p-4 bg-white border-l-4 transition-colors hover:bg-slate-50"
+      style={{ borderLeftColor: color }}
+    >
+      <div className="flex items-center gap-3">
+        <Icon size={20} color={color} />
+        <span className="text-base font-bold text-slate-700">{title}</span>
+      </div>
+      {isOpen ? (
+        <ChevronUp size={20} className="text-slate-400" />
+      ) : (
+        <ChevronDown size={20} className="text-slate-400" />
+      )}
+    </button>
+    {isOpen && <div className="p-4 border-t border-slate-100">{children}</div>}
+  </div>
+);
+
+const JsonResultsTable = ({
+  data,
+  level = 0,
+}: {
+  data: any;
+  level?: number;
+}) => {
+  if (!data) return <span className="text-xs text-slate-400">Sin datos.</span>;
+  if (typeof data !== "object")
+    return <span className="text-sm text-slate-700">{String(data)}</span>;
+
+  if (Array.isArray(data)) {
+    if (data.length === 0)
+      return <span className="text-xs text-slate-400">[ Vacío ]</span>;
+    return (
+      <div className="flex flex-col gap-1">
+        {data.map((item, idx) => (
+          <div key={idx} className="ml-2 pl-2 border-l-2 border-slate-300">
+            <JsonResultsTable data={item} level={level + 1} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full">
+      {Object.entries(data).map(([key, value], index) => (
+        <div
+          key={key}
+          className={`flex p-2 border-b border-slate-100 last:border-0 ${
+            index % 2 === 0 ? "bg-slate-50" : ""
+          }`}
+        >
+          <span
+            className="font-bold text-slate-600 text-xs w-[40%] pr-2 uppercase"
+            style={{ paddingLeft: level * 8 }}
+          >
+            {key.replace(/_/g, " ")}:
+          </span>
+          <div className="flex-1">
+            <JsonResultsTable data={value} level={level + 1} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const LabResultItem = ({ lab }: { lab: LabResult }) => {
+  const [expanded, setExpanded] = useState(false);
+  const formattedDate = new Date(
+    lab.analyzed_at || new Date()
+  ).toLocaleDateString();
+
+  return (
+    <div className="mb-2 border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex justify-between items-center p-3 bg-slate-50 hover:bg-slate-100 transition-colors"
+      >
+        <div className="text-left">
+          <p className="font-bold text-violet-600 text-sm mb-0.5">{lab.type}</p>
+          <p className="text-xs text-slate-400">{formattedDate}</p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {lab.status ? (
+            <div className="px-2 py-0.5 rounded-full bg-green-100">
+              <span className="text-[10px] font-bold text-green-800">
+                COMPLETADO
+              </span>
+            </div>
+          ) : (
+            <div className="px-2 py-0.5 rounded-full bg-yellow-50">
+              <span className="text-[10px] font-bold text-yellow-800">
+                PENDIENTE
+              </span>
+            </div>
+          )}
+          {expanded ? (
+            <ChevronUp size={20} className="text-slate-400" />
+          ) : (
+            <ChevronDown size={20} className="text-slate-400" />
+          )}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="p-4 bg-white">
+          <p className="text-xs font-bold text-slate-400 mb-1">Descripción:</p>
+          <p className="text-sm text-slate-700 italic mb-3">
+            "{lab.description}"
+          </p>
+
+          {lab.status ? (
+            <>
+              <div className="mt-2 border border-slate-200 rounded-lg overflow-hidden">
+                <JsonResultsTable data={lab.results_json} />
+              </div>
+
+              {lab.result_text && (
+                <div className="bg-violet-50 p-3 rounded-lg mt-3">
+                  <p className="text-xs text-violet-600 font-bold mb-1">
+                    CONCLUSIÓN MÉDICA:
+                  </p>
+                  <p className="text-violet-800 text-sm font-semibold">
+                    {lab.result_text}
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="mt-2 p-2 bg-amber-50 rounded-lg border border-amber-100">
+              <p className="text-amber-600 italic text-xs">
+                Esperando resultados del laboratorio...
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const LAB_TYPES = [
   "Bioquímica y Hematología",
   "Inmunología y Serología",
@@ -36,113 +203,45 @@ const LAB_TYPES = [
   "Endocrinología (Hormonas)",
 ];
 
-// 3. Item de Resultado de Laboratorio Colapsable
-const LabResultItem = ({ lab }: { lab: LabResult }) => {
-  const [expanded, setExpanded] = useState(false);
-
-  // Formatear Fecha
-  const formattedDate = new Date(
-    lab.analyzed_at || new Date()
-  ).toLocaleDateString();
-
-  return (
-    <div className="mb-2 overflow-hidden rounded-lg border border-slate-200 bg-white">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center justify-between bg-slate-50 px-3 py-3 hover:bg-slate-100"
-      >
-        <div className="flex flex-col items-start">
-          <span className="text-sm font-bold text-violet-600 line-clamp-1 text-left">
-            {lab.type}
-          </span>
-          <span className="text-xs text-slate-400">{formattedDate}</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {lab.status ? (
-            <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-800">
-              COMPLETADO
-            </span>
-          ) : (
-            <span className="rounded-full bg-yellow-50 px-2 py-0.5 text-[10px] font-bold text-yellow-800">
-              PENDIENTE
-            </span>
-          )}
-          {expanded ? (
-            <ChevronUp size={16} className="text-slate-400" />
-          ) : (
-            <ChevronDown size={16} className="text-slate-400" />
-          )}
-        </div>
-      </button>
-
-      {expanded && (
-        <div className="p-4">
-          <span className="mb-1 block text-xs font-bold text-slate-400">
-            Descripción:
-          </span>
-          <p className="mb-4 text-sm italic text-slate-700">
-            "{lab.description}"
-          </p>
-
-          {lab.status ? (
-            <>
-              {/* Tabla Dinámica JSON Recursiva */}
-              <div className="mt-2 overflow-hidden rounded-lg border border-slate-200">
-                <JsonResultsTable data={lab.results_json} />
-              </div>
-
-              {lab.result_text && (
-                <div className="mt-4 rounded-lg bg-violet-50 p-3">
-                  <span className="block text-xs font-bold text-violet-600">
-                    CONCLUSIÓN MÉDICA:
-                  </span>
-                  <p className="mt-1 text-sm font-semibold text-violet-800">
-                    {lab.result_text}
-                  </p>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="mt-2 rounded-lg bg-amber-50 p-3">
-              <span className="text-xs font-medium italic text-amber-600">
-                Esperando resultados del laboratorio...
-              </span>
-            </div>
-          )}
-        </div>
-      )}
+const TestButton = ({ title, icon: Icon, score, onPress, color }: any) => (
+  <button
+    className="w-full flex items-center justify-between p-4 bg-white rounded-xl border border-slate-200 border-l-4 hover:shadow-md transition-shadow group"
+    style={{ borderLeftColor: color }}
+    onClick={onPress}
+  >
+    <div className="flex items-center gap-3">
+      <Icon size={24} color={color} />
+      <div className="text-left">
+        <p className="text-base font-bold text-slate-700 group-hover:text-slate-900">
+          {title}
+        </p>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Puntaje: {score !== undefined && score !== "" ? score : "---"}
+        </p>
+      </div>
     </div>
-  );
-};
-
-// --- COMPONENTE PRINCIPAL ---
+    <ChevronDown size={20} className="text-slate-400" />
+  </button>
+);
 
 export default function ClinicalCaseDetail({
   caseId,
   patientId,
   onClose,
-}: {
-  caseId: string;
-  patientId: string;
-  onClose: () => void;
-}) {
+}: any) {
   const [loading, setLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
   const [patient, setPatient] = useState<PatientProfile | null>(null);
-
   const [history, setHistory] = useState<MedicalHistory | null>(null);
   const [triage, setTriage] = useState<TriageRecord | null>(null);
   const [labResults, setLabResults] = useState<LabResult[]>([]);
-  const { user } = useAuth();
 
-  // Estado de Solicitud de Lab
+  // Labs State
   const [showLabOrder, setShowLabOrder] = useState(false);
   const [newLabType, setNewLabType] = useState(LAB_TYPES[0]);
   const [newLabDesc, setNewLabDesc] = useState("");
   const [orderingLab, setOrderingLab] = useState(false);
 
-  // Estado de Formularios
+  // Forms State
   const [anamnesis, setAnamnesis] = useState<GeneralConsultation>({
     id: "",
     reason_consultation: "",
@@ -151,15 +250,28 @@ export default function ClinicalCaseDetail({
     pathological_history: "",
     physical_exam_notes: "",
   });
+
   const [neuroAssessment, setNeuroAssessment] = useState<NeurologyAssessment>({
     has_chorea: false,
+    has_dystonia: false,
+    has_bradykinesia: false,
     uhdrs_motor_score: "",
     mmse_score: "",
+    pba_score: "",
+    fc_score: "",
     clinical_notes: "",
     diagnosis: "",
+    uhdrs_motor_info: {},
+    mmse_info: {},
+    pba_info: {},
+    fc_info: {},
   });
 
-  // Estado de UI
+  // Test Modals State
+  const [activeTest, setActiveTest] = useState<
+    "MOTOR" | "MMSE" | "PBA" | "FC" | null
+  >(null);
+
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     history: false,
     triage: false,
@@ -167,34 +279,25 @@ export default function ClinicalCaseDetail({
     labs: true,
     neuro: true,
   });
-
-  // Estado de IA
   const [aiThinking, setAiThinking] = useState(false);
   const [aiOptions, setAiOptions] = useState<{
     gpt: string;
     copilot: string;
   } | null>(null);
 
-  // Cargar datos
   const loadData = async () => {
     try {
       setLoading(true);
-
-      // 1. Perfil del Paciente
       const patientPromise = supabase
         .from("profiles")
         .select("*")
         .eq("id", patientId)
         .single();
-
-      // 2. Historial Médico
       const historyPromise = supabase
         .from("medical_histories")
         .select("*")
         .eq("patient_id", patientId)
         .single();
-
-      // 3. Triaje (Asociado al caso)
       const triagePromise = supabase
         .from("triage_records")
         .select("*")
@@ -202,22 +305,16 @@ export default function ClinicalCaseDetail({
         .order("created_at", { ascending: false })
         .limit(1)
         .single();
-
-      // 4. Anamnesis (General Consultation asociada al caso)
       const anamnesisPromise = supabase
         .from("general_consultations")
         .select("*")
         .eq("case_id", caseId)
         .single();
-
-      // 5. Resultados de Laboratorio
       const labsPromise = supabase
         .from("lab_results")
         .select("*")
         .eq("case_id", caseId)
         .order("created_at", { ascending: false });
-
-      // 6. Evaluación Neurológica
       const neuroPromise = supabase
         .from("neurology_assessments")
         .select("*")
@@ -240,31 +337,27 @@ export default function ClinicalCaseDetail({
         neuroPromise,
       ]);
 
-      if (patientRes.data) setPatient(patientRes.data as any);
-      if (historyRes.data) setHistory(historyRes.data as any);
-      if (triageRes.data) setTriage(triageRes.data as any);
-      if (anamnesisRes.data) setAnamnesis(anamnesisRes.data as any);
-      if (labsRes.data) setLabResults(labsRes.data as any);
-      if (neuroRes.data) setNeuroAssessment(neuroRes.data as any);
+      if (patientRes.data) setPatient(patientRes.data);
+      if (historyRes.data) setHistory(historyRes.data);
+      if (triageRes.data) setTriage(triageRes.data);
+      if (anamnesisRes.data) setAnamnesis(anamnesisRes.data);
+      if (labsRes.data) setLabResults(labsRes.data);
+      if (neuroRes.data) setNeuroAssessment(neuroRes.data);
     } catch (error) {
       console.error("Error loading clinical case data:", error);
-      alert("Error: No se pudieron cargar todos los datos del caso.");
+      alert("No se pudieron cargar todos los datos del caso.");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (caseId && patientId) {
-      loadData();
-    }
+    if (caseId && patientId) loadData();
   }, [caseId, patientId]);
 
   const toggleSection = (key: string) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
-
-  // --- ACCIONES DE GUARDADO ---
 
   const saveAnamnesis = async () => {
     try {
@@ -279,70 +372,84 @@ export default function ClinicalCaseDetail({
       });
 
       if (error) throw error;
-      alert("Éxito: Anamnesis guardada correctamente.");
+      alert("Anamnesis guardada correctamente.");
     } catch (error) {
       console.error("Error saving anamnesis:", error);
-      alert("Error: No se pudo guardar la anamnesis.");
+      alert("No se pudo guardar la anamnesis.");
     }
   };
 
-  const saveNeuroAssessment = async () => {
-    console.log("Iniciando guardado de evaluación...", neuroAssessment);
-
-    if (!user) {
-      alert("Sesión no detectada. Por favor recarga la página.");
-      return;
-    }
-
-    setIsSaving(true);
+  // Generic function to save assessment updates
+  const saveNeuroUpdate = async (updates: Partial<NeurologyAssessment>) => {
     try {
       const payload: any = {
         case_id: caseId,
-        doctor_id: user?.id, // ID del doctor actual
-        has_chorea: neuroAssessment.has_chorea,
-        // Convertir strings a números de forma segura
-        uhdrs_motor_score:
-          parseInt(String(neuroAssessment.uhdrs_motor_score)) || 0,
-        mmse_score: parseInt(String(neuroAssessment.mmse_score)) || 0,
-        clinical_notes: neuroAssessment.clinical_notes || "",
-        diagnosis: neuroAssessment.diagnosis || "",
+        ...neuroAssessment, // current state
+        ...updates, // new updates
       };
 
-      if (neuroAssessment.id) {
-        payload.id = neuroAssessment.id;
-      }
-
-      console.log("Enviando payload a Supabase:", payload);
+      // Clean undefineds
+      if (!payload.id) delete payload.id;
 
       const { data, error } = await supabase
         .from("neurology_assessments")
         .upsert(payload)
-        .select();
+        .select()
+        .single();
 
-      if (error) {
-        console.error("Error devuelto por Supabase:", error);
-        throw error;
-      }
-
-      console.log("Guardado exitoso:", data);
-      alert("Éxito: Evaluación guardada correctamente.");
-      onClose();
-
-      // Actualizar estado local si es necesario (ej. capturar ID nuevo)
-      if (data && data[0]) {
-        setNeuroAssessment((prev) => ({ ...prev, id: data[0].id }));
-      }
-    } catch (error: any) {
-      console.error("EXCEPCIÓN al guardar evaluación:", error);
-      alert(`Error al guardar: ${error.message || "Ver consola"}`);
-    } finally {
-      setIsSaving(false);
+      if (error) throw error;
+      setNeuroAssessment(data); // Update local state with saved data
+      return true;
+    } catch (error) {
+      console.error("Error saving neuro assessment:", error);
+      alert("No se pudo guardar la evaluación.");
+      return false;
     }
+  };
+
+  const handleSaveTest = async (
+    testType: string,
+    scores: any,
+    total: number
+  ) => {
+    let updates: Partial<NeurologyAssessment> = {};
+
+    switch (testType) {
+      case "MOTOR":
+        updates = { uhdrs_motor_score: total, uhdrs_motor_info: scores };
+        break;
+      case "MMSE":
+        updates = { mmse_score: total, mmse_info: scores };
+        break;
+      case "PBA":
+        updates = { pba_score: total, pba_info: scores };
+        break;
+      case "FC":
+        updates = { fc_score: total, fc_info: scores };
+        break;
+    }
+
+    const success = await saveNeuroUpdate(updates);
+    if (success) {
+      setActiveTest(null);
+      alert(`Evaluación ${testType} guardada con éxito.`);
+    }
+  };
+
+  const saveFullNeuro = async () => {
+    const success = await saveNeuroUpdate({
+      clinical_notes: neuroAssessment.clinical_notes,
+      diagnosis: neuroAssessment.diagnosis,
+      has_chorea: neuroAssessment.has_chorea,
+      has_dystonia: neuroAssessment.has_dystonia,
+      has_bradykinesia: neuroAssessment.has_bradykinesia,
+    });
+    if (success) alert("Evaluación global guardada.");
   };
 
   const requestLabTest = async () => {
     if (!newLabDesc) {
-      alert("Error: Ingrese una descripción para el examen.");
+      alert("Ingrese una descripción para el examen.");
       return;
     }
     setOrderingLab(true);
@@ -351,86 +458,68 @@ export default function ClinicalCaseDetail({
         case_id: caseId,
         type: newLabType,
         description: newLabDesc,
-        status: false, // Pendiente
+        status: false,
       });
 
       if (error) throw error;
-      alert("Solicitud Enviada: El examen ha sido solicitado.");
+      alert("El examen ha sido solicitado.");
       setShowLabOrder(false);
       setNewLabDesc("");
-      // Recargar labs
       const { data } = await supabase
         .from("lab_results")
         .select("*")
         .eq("case_id", caseId)
         .order("created_at", { ascending: false });
-      if (data) setLabResults(data as any);
+      if (data) setLabResults(data);
     } catch (error) {
       console.error("Error requesting lab:", error);
-      alert("Error: No se pudo solicitar el examen.");
+      alert("No se pudo solicitar el examen.");
     } finally {
       setOrderingLab(false);
     }
   };
 
-  // --- LÓGICA DE IA ---
-  // --- LÓGICA DE IA REAL ---
+  // AI Logic
   const consultAI = async () => {
     setAiThinking(true);
     setAiOptions(null);
 
-    // Preparar el payload con toda la data disponible
-    const caseData = {
-      history,
-      triage,
-      labs: labResults,
-      neuro: neuroAssessment,
-    };
-
     try {
-      // Llamadas en paralelo a ambas APIs
+      // Calcular edad (aproximada si no hay DOB)
+      const birthDate = new Date(patient?.birthday || "1980-01-01");
+      const ageDiffJs = Date.now() - birthDate.getTime();
+      const ageDate = new Date(ageDiffJs);
+      const age = Math.abs(ageDate.getUTCFullYear() - 1970);
+
+      // Generar Prompt
+      const prompt = generateMedicalPrompt(
+        `${patient?.first_name} ${patient?.last_name}`,
+        age,
+        labResults,
+        neuroAssessment
+      );
+
+      console.log("Enviando Prompt a AI:", prompt);
+
+      // Llamadas Paralelas
       const [gptRes, geminiRes] = await Promise.allSettled([
-        fetch("/api/ai/openai", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ data: caseData }),
-        }),
-        fetch("/api/ai/gemini", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ data: caseData }),
-        }),
+        getChatGPTDiagnosis(prompt),
+        getGeminiDiagnosis(prompt),
       ]);
 
-      let gptText = "Error consultando GPT.";
-      let geminiText = "Error consultando Gemini.";
-
-      // Procesar OpenAI
-      if (gptRes.status === "fulfilled" && gptRes.value.ok) {
-        const data = await gptRes.value.json();
-        // Formatear respuesta para mostrar
-        gptText = `[${data.confidence}] ${data.diagnosis}. ${data.reasoning}`;
-      } else if (gptRes.status === "fulfilled") {
-        const err = await gptRes.value.json();
-        gptText = `Error: ${err.error || "Falta configuración de API Key"}`;
-      }
-
-      // Procesar Gemini
-      if (geminiRes.status === "fulfilled" && geminiRes.value.ok) {
-        const data = await geminiRes.value.json();
-        geminiText = `[${data.confidence}] ${data.diagnosis}. ${data.reasoning}`;
-      } else if (geminiRes.status === "fulfilled") {
-        const err = await geminiRes.value.json();
-        geminiText = `Error: ${err.error || "Falta configuración de API Key"}`;
-      }
-
       setAiOptions({
-        gpt: gptText,
-        copilot: geminiText, // Reusamos el campo 'copilot' para Gemini en la UI
+        gpt:
+          gptRes.status === "fulfilled"
+            ? gptRes.value
+            : "Error conectando con ChatGPT",
+        copilot:
+          geminiRes.status === "fulfilled"
+            ? geminiRes.value
+            : "Error conectando con Gemini",
       });
     } catch (error) {
-      console.error("Error en consulta IA:", error);
-      alert("Error de conexión al consultar las IAs.");
+      console.error("Error AI:", error);
+      alert("Fallo al consultar los servicios de IA.");
     } finally {
       setAiThinking(false);
     }
@@ -439,146 +528,123 @@ export default function ClinicalCaseDetail({
   const selectAiOption = (text: string) => {
     setNeuroAssessment((prev) => ({ ...prev, diagnosis: text }));
     setAiOptions(null);
-    alert("Diagnóstico Importado. Puedes editar el texto antes de guardar.");
+    alert("El texto ha sido copiado al campo de diagnóstico final.");
   };
 
-  if (loading) {
+  if (loading)
     return (
-      <div className="flex h-full items-center justify-center p-10">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+      <div className="flex flex-1 justify-center items-center h-full">
+        <span className="animate-spin h-8 w-8 border-4 border-blue-500 rounded-full border-t-transparent"></span>
       </div>
     );
-  }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-50 lg:static lg:h-auto">
-      {/* Header Fijo */}
-      <div className="flex items-center justify-between bg-slate-900 px-6 py-4 shadow-md">
-        <div className="flex items-center gap-4">
-          <img
-            src={patient?.avatar_url || "https://i.pravatar.cc/150"}
-            alt="Avatar"
-            className="h-12 w-12 rounded-full border-2 border-white object-cover"
-          />
-          <div>
-            <h2 className="text-lg font-bold text-white">
-              {patient?.first_name} {patient?.last_name}
-            </h2>
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <Phone size={12} />
-              <span>{patient?.phone || "Sin teléfono"}</span>
-              <span className="ml-2">DNI: {patient?.dni || "---"}</span>
+    <div className="flex flex-col h-full bg-slate-50 relative">
+      {/* Header */}
+      <div className="bg-slate-800 p-6 pb-8 rounded-b-3xl shadow-lg">
+        <div className="flex justify-between items-start">
+          <div className="flex items-center gap-4">
+            <div className="relative w-16 h-16 rounded-full border-2 border-white overflow-hidden bg-slate-200">
+              {patient?.avatar_url ? (
+                <Image
+                  src={patient.avatar_url}
+                  alt="Patient"
+                  layout="fill"
+                  objectFit="cover"
+                />
+              ) : (
+                <div className="w-full h-full bg-slate-400" />
+              )}
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-white leading-tight">
+                {patient?.first_name} {patient?.last_name}
+              </h2>
+              <div className="flex items-center gap-2 mt-1">
+                <Phone size={14} className="text-slate-300" />
+                <span className="text-slate-300 text-sm">
+                  {patient?.phone || "Sin teléfono"}
+                </span>
+              </div>
+              <span className="text-slate-400 text-xs mt-0.5 block">
+                DNI: {patient?.dni || "---"}
+              </span>
             </div>
           </div>
+          <button
+            onClick={onClose}
+            className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-colors"
+          >
+            <X size={20} className="text-white" />
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-        >
-          <X size={24} />
-        </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 lg:p-6">
-        {/* 1. Historial Médico */}
+      <div className="flex-1 overflow-y-auto p-4 max-w-5xl mx-auto w-full">
+        {/* 1. History */}
         <Accordion
           title="Historial Médico General"
           icon={FileText}
           isOpen={openSections["history"]}
           onToggle={() => toggleSection("history")}
-          color="text-slate-500"
-          borderColor="border-slate-500"
+          color="#64748b"
         >
-          <ul className="list-inside list-disc space-y-1 text-sm text-slate-600">
-            <li>
-              <span className="font-semibold">Alergias:</span>{" "}
-              {history?.allergies?.join(", ") || "Ninguna"}
-            </li>
-            <li>
-              <span className="font-semibold">Tipo de Sangre:</span>{" "}
-              {history?.blood_type || "Desconocido"}
-            </li>
-            <li>
-              <span className="font-semibold">Condiciones:</span>{" "}
-              {history?.chronic_conditions?.join(", ") || "Ninguna"}
-            </li>
-          </ul>
+          <p className="text-slate-500 mb-1">
+            • Alergias: {history?.allergies?.join(", ") || "Ninguna"}
+          </p>
+          <p className="text-slate-500 mb-1">
+            • Tipo de Sangre: {history?.blood_type || "Desconocido"}
+          </p>
+          <p className="text-slate-500">
+            • Condiciones:{" "}
+            {history?.chronic_conditions?.join(", ") || "Ninguna"}
+          </p>
         </Accordion>
 
-        {/* 2. Triaje */}
+        {/* 2. Triage */}
         <Accordion
           title="Datos de Triaje"
           icon={Activity}
           isOpen={openSections["triage"]}
           onToggle={() => toggleSection("triage")}
-          color="text-orange-600"
-          borderColor="border-orange-600"
+          color="#ea580c"
         >
           {triage ? (
             <div>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="flex flex-col items-center rounded-lg bg-orange-50 p-3">
-                  <span className="text-[10px] font-bold uppercase text-orange-600">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-orange-50 p-3 rounded-lg flex flex-col items-center">
+                  <span className="text-orange-600 text-xs font-bold uppercase mb-1">
                     Presión
                   </span>
-                  <span className="text-lg font-bold text-orange-800">
+                  <span className="text-orange-800 text-lg font-bold">
                     {triage.systolic_pressure}/{triage.diastolic_pressure}
                   </span>
                 </div>
-                <div className="flex flex-col items-center rounded-lg bg-orange-50 p-3">
-                  <span className="text-[10px] font-bold uppercase text-orange-600">
+                <div className="bg-orange-50 p-3 rounded-lg flex flex-col items-center">
+                  <span className="text-orange-600 text-xs font-bold uppercase mb-1">
                     Peso
                   </span>
-                  <span className="text-lg font-bold text-orange-800">
+                  <span className="text-orange-800 text-lg font-bold">
                     {triage.weight_kg} kg
                   </span>
                 </div>
-                <div className="flex flex-col items-center rounded-lg bg-orange-50 p-3">
-                  <span className="text-[10px] font-bold uppercase text-orange-600">
+                <div className="bg-orange-50 p-3 rounded-lg flex flex-col items-center">
+                  <span className="text-orange-600 text-xs font-bold uppercase mb-1">
                     Temp
                   </span>
-                  <span className="text-lg font-bold text-orange-800">
+                  <span className="text-orange-800 text-lg font-bold">
                     {triage.temperature}°C
                   </span>
                 </div>
               </div>
-              <div className="mt-4 grid grid-cols-3 gap-4">
-                <div className="flex flex-col items-center rounded-lg bg-orange-50 p-3">
-                  <span className="text-[10px] font-bold uppercase text-orange-600">
-                    Ritmo Card.
-                  </span>
-                  <span className="text-lg font-bold text-orange-800">
-                    {triage.heart_rate} bpm
-                  </span>
-                </div>
-                <div className="flex flex-col items-center rounded-lg bg-orange-50 p-3">
-                  <span className="text-[10px] font-bold uppercase text-orange-600">
-                    Sat. O2
-                  </span>
-                  <span className="text-lg font-bold text-orange-800">
-                    {triage.oxygen_saturation}%
-                  </span>
-                </div>
-                <div className="flex flex-col items-center rounded-lg bg-orange-50 p-3">
-                  <span className="text-[10px] font-bold uppercase text-orange-600">
-                    Talla
-                  </span>
-                  <span className="text-lg font-bold text-orange-800">-</span>
-                </div>
-              </div>
               {triage.notes && (
-                <div className="mt-4 rounded-lg bg-orange-50 p-3">
-                  <span className="text-xs font-bold text-orange-600">
-                    NOTAS DE TRIAJE:
-                  </span>
-                  <p className="mt-1 text-sm text-orange-800">{triage.notes}</p>
-                </div>
+                <p className="mt-3 text-orange-700 text-sm italic">
+                  {triage.notes}
+                </p>
               )}
             </div>
           ) : (
-            <p className="text-sm text-slate-400">
-              No hay datos de triaje recientes.
-            </p>
+            <span className="text-slate-400">Sin datos recientes.</span>
           )}
         </Accordion>
 
@@ -588,99 +654,118 @@ export default function ClinicalCaseDetail({
           icon={FileText}
           isOpen={openSections["anamnesis"]}
           onToggle={() => toggleSection("anamnesis")}
-          color="text-blue-600"
-          borderColor="border-blue-600"
+          color="#2563eb"
         >
-          <div className="space-y-4">
-            <div>
-              <label className="mb-1 block text-xs font-bold uppercase text-slate-500">
-                Motivo de Consulta
-              </label>
-              <textarea
-                className="w-full rounded-lg border border-slate-300 bg-slate-50 p-3 text-sm focus:border-blue-500 focus:outline-none"
-                rows={3}
-                value={anamnesis.reason_consultation || ""}
-                onChange={(e) =>
-                  setAnamnesis({
-                    ...anamnesis,
-                    reason_consultation: e.target.value,
-                  })
-                }
-                placeholder="Motivo principal..."
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-bold uppercase text-slate-500">
-                Enfermedad Actual
-              </label>
-              <textarea
-                className="w-full rounded-lg border border-slate-300 bg-slate-50 p-3 text-sm focus:border-blue-500 focus:outline-none"
-                rows={3}
-                value={anamnesis.current_illness || ""}
-                onChange={(e) =>
-                  setAnamnesis({
-                    ...anamnesis,
-                    current_illness: e.target.value,
-                  })
-                }
-                placeholder="Describa la enfermedad actual..."
-              />
-            </div>
-            {/* ... Other inputs can be added similarly ... */}
+          <label className="block text-xs font-bold text-slate-500 uppercase mt-2 mb-1">
+            Motivo de Consulta
+          </label>
+          <textarea
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none h-24"
+            value={anamnesis.reason_consultation || ""}
+            onChange={(e) =>
+              setAnamnesis({
+                ...anamnesis,
+                reason_consultation: e.target.value,
+              })
+            }
+          />
+
+          <label className="block text-xs font-bold text-slate-500 uppercase mt-4 mb-1">
+            Enfermedad Actual
+          </label>
+          <textarea
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none h-24"
+            value={anamnesis.current_illness || ""}
+            onChange={(e) =>
+              setAnamnesis({ ...anamnesis, current_illness: e.target.value })
+            }
+          />
+
+          <div className="flex justify-end mt-3">
             <button
               onClick={saveAnamnesis}
-              className="ml-auto block rounded-lg text-sm font-bold text-blue-600 hover:text-blue-700"
+              className="text-blue-600 text-xs font-bold hover:underline"
             >
               Guardar Anamnesis
             </button>
           </div>
         </Accordion>
 
-        {/* 4. Resultados de Laboratorio */}
+        {/* 4. Labs */}
         <Accordion
           title="Resultados de Laboratorio"
           icon={FlaskConical}
           isOpen={openSections["labs"]}
           onToggle={() => toggleSection("labs")}
-          color="text-violet-600"
-          borderColor="border-violet-600"
+          color="#7c3aed"
         >
           <button
             onClick={() => setShowLabOrder(true)}
-            className="mb-4 flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-violet-700"
+            className="w-full flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white p-3 rounded-lg mb-4 transition-colors font-bold text-sm"
           >
-            <Plus size={16} /> Solicitar Nuevo Examen
+            <Plus size={16} />
+            Solicitar Nuevo Examen
           </button>
-
           {labResults.length > 0 ? (
-            <div>
+            <div className="flex flex-col gap-2">
               {labResults.map((lab) => (
                 <LabResultItem key={lab.id} lab={lab} />
               ))}
             </div>
           ) : (
-            <p className="text-sm text-slate-400">
-              No hay resultados de laboratorio.
-            </p>
+            <span className="text-slate-400 italic">No hay resultados.</span>
           )}
         </Accordion>
 
-        {/* 5. Evaluación Neurológica */}
+        {/* 5. Neurology Assessment (Detailed) */}
         <Accordion
           title="Evaluación Neurológica"
           icon={Brain}
           isOpen={openSections["neuro"]}
           onToggle={() => toggleSection("neuro")}
-          color="text-teal-600"
-          borderColor="border-teal-600"
+          color="#0d9488"
         >
-          <div className="space-y-4">
-            <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
-              <span className="text-sm font-bold text-slate-700">
-                Presencia de Corea
-              </span>
+          {/* Botones de Tests Específicos */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+            <TestButton
+              title="Evaluación Motora (UHDRS)"
+              icon={ClipboardList}
+              score={neuroAssessment.uhdrs_motor_score}
+              color="#e11d48"
+              onPress={() => setActiveTest("MOTOR")}
+            />
+            <TestButton
+              title="Cognitivo (MMSE)"
+              icon={Brain}
+              score={neuroAssessment.mmse_score}
+              color="#2563eb"
+              onPress={() => setActiveTest("MMSE")}
+            />
+            <TestButton
+              title="Conductual (PBA)"
+              icon={ActivitySquare}
+              score={neuroAssessment.pba_score}
+              color="#d97706"
+              onPress={() => setActiveTest("PBA")}
+            />
+            <TestButton
+              title="Capacidad Funcional (TFC)"
+              icon={UserCheck}
+              score={neuroAssessment.fc_score}
+              color="#059669"
+              onPress={() => setActiveTest("FC")}
+            />
+          </div>
+
+          {/* Checkbox Rapidos */}
+          <label className="block text-xs font-bold text-slate-500 uppercase mt-4 mb-2">
+            Observaciones Rápidas
+          </label>
+          <div className="flex flex-wrap gap-4 mb-4">
+            <label className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
               <input
                 type="checkbox"
+                className="accent-teal-600 w-5 h-5 rounded"
                 checked={neuroAssessment.has_chorea}
                 onChange={(e) =>
                   setNeuroAssessment({
@@ -688,189 +773,220 @@ export default function ClinicalCaseDetail({
                     has_chorea: e.target.checked,
                   })
                 }
-                className="h-5 w-5 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
               />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="mb-1 block text-xs font-bold text-slate-500">
-                  UHDRS Motor (0-124)
-                </label>
-                <input
-                  type="number"
-                  className="w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-sm"
-                  value={neuroAssessment.uhdrs_motor_score}
-                  onChange={(e) =>
-                    setNeuroAssessment({
-                      ...neuroAssessment,
-                      uhdrs_motor_score: e.target.value,
-                    })
-                  }
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-bold text-slate-500">
-                  MMSE Cognitivo (0-30)
-                </label>
-                <input
-                  type="number"
-                  className="w-full rounded-lg border border-slate-300 bg-slate-50 p-2 text-sm"
-                  value={neuroAssessment.mmse_score}
-                  onChange={(e) =>
-                    setNeuroAssessment({
-                      ...neuroAssessment,
-                      mmse_score: e.target.value,
-                    })
-                  }
-                />
-              </div>
-            </div>
-
-            {/* AI Section */}
-            <div className="mt-6 rounded-xl bg-slate-800 p-4 text-white">
-              <div className="mb-2 flex items-center gap-2">
-                <Sparkles size={18} className="text-amber-400" />
-                <span className="font-bold text-amber-400">
-                  Consultar Inteligencia Artificial
-                </span>
-              </div>
-              <p className="mb-4 text-xs text-slate-400">
-                Enviar datos (Lab + Motor + Cognitivo) para análisis preliminar.
-              </p>
-
-              {!aiThinking && !aiOptions && (
-                <button
-                  onClick={consultAI}
-                  className="w-full rounded-lg bg-amber-400 px-4 py-2 text-sm font-bold text-amber-950 hover:bg-amber-300"
-                >
-                  Consultar a GPT-4 & Copilot
-                </button>
-              )}
-
-              {aiThinking && (
-                <div className="flex justify-center py-2">
-                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
-                </div>
-              )}
-
-              {aiOptions && (
-                <div className="space-y-3">
-                  <button
-                    onClick={() => selectAiOption(aiOptions.gpt)}
-                    className="w-full rounded-lg border border-slate-600 bg-slate-700 p-3 text-left transition-colors hover:bg-slate-600"
-                  >
-                    <span className="mb-1 block text-[10px] font-bold uppercase text-slate-400">
-                      GPT-4o
-                    </span>
-                    <p className="text-xs text-slate-200">{aiOptions.gpt}</p>
-                  </button>
-                  <button
-                    onClick={() => selectAiOption(aiOptions.copilot)}
-                    className="w-full rounded-lg border border-slate-600 bg-slate-700 p-3 text-left transition-colors hover:bg-slate-600"
-                  >
-                    <span className="mb-1 block text-[10px] font-bold uppercase text-slate-400">
-                      Google Gemini 2.5
-                    </span>
-                    <p className="text-xs text-slate-200">
-                      {aiOptions.copilot}
-                    </p>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-bold uppercase text-slate-500">
-                Diagnóstico Final
-              </label>
-              <textarea
-                className="w-full rounded-lg border border-teal-500 bg-slate-50 p-3 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
-                rows={4}
-                value={neuroAssessment.diagnosis}
+              <span className="text-sm text-slate-700">Corea visible</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
+              <input
+                type="checkbox"
+                className="accent-teal-600 w-5 h-5 rounded"
+                checked={neuroAssessment.has_dystonia}
                 onChange={(e) =>
                   setNeuroAssessment({
                     ...neuroAssessment,
-                    diagnosis: e.target.value,
+                    has_dystonia: e.target.checked,
                   })
                 }
               />
+              <span className="text-sm text-slate-700">Distonía</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
+              <input
+                type="checkbox"
+                className="accent-teal-600 w-5 h-5 rounded"
+                checked={neuroAssessment.has_bradykinesia}
+                onChange={(e) =>
+                  setNeuroAssessment({
+                    ...neuroAssessment,
+                    has_bradykinesia: e.target.checked,
+                  })
+                }
+              />
+              <span className="text-sm text-slate-700">Bradicinesia</span>
+            </label>
+          </div>
+
+          <label className="block text-xs font-bold text-slate-500 uppercase mt-4 mb-1">
+            Notas Clínicas
+          </label>
+          <textarea
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-teal-500 outline-none h-24 mb-4"
+            placeholder="Observaciones generales..."
+            value={neuroAssessment.clinical_notes || ""}
+            onChange={(e) =>
+              setNeuroAssessment({
+                ...neuroAssessment,
+                clinical_notes: e.target.value,
+              })
+            }
+          />
+
+          {/* AI Section */}
+          <div className="bg-slate-800 rounded-xl p-5 mb-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Sparkles size={18} className="text-yellow-400" />
+              <span className="text-yellow-400 font-bold text-sm uppercase">
+                Consultar Inteligencia Artificial
+              </span>
             </div>
 
-            <button
-              type="button"
-              onClick={saveNeuroAssessment}
-              disabled={isSaving}
-              className={`mt-4 flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 font-bold text-white transition-colors ${
-                isSaving
-                  ? "bg-teal-800 cursor-not-allowed"
-                  : "bg-teal-700 hover:bg-teal-800"
-              }`}
-            >
-              <Save size={20} />{" "}
-              {isSaving ? "Guardando..." : "Guardar y Cerrar Caso"}
-            </button>
+            {!aiThinking && !aiOptions && (
+              <button
+                onClick={consultAI}
+                className="w-full py-3 bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-bold rounded-lg transition-colors"
+              >
+                Generar Diagnóstico Asistido
+              </button>
+            )}
+
+            {aiThinking && (
+              <div className="flex justify-center p-4">
+                <span className="animate-spin h-6 w-6 border-2 border-yellow-400 rounded-full border-t-transparent"></span>
+              </div>
+            )}
+
+            {aiOptions && (
+              <div className="flex flex-col gap-3 mt-3">
+                <button
+                  onClick={() => selectAiOption(aiOptions.gpt)}
+                  className="bg-slate-700 border border-slate-600 p-4 rounded-lg text-left hover:bg-slate-600 transition-colors"
+                >
+                  <span className="text-slate-400 text-[10px] font-bold uppercase block mb-2">
+                    GPT-4o
+                  </span>
+                  <p className="text-slate-200 text-sm">{aiOptions.gpt}</p>
+                </button>
+                <button
+                  onClick={() => selectAiOption(aiOptions.copilot)}
+                  className="bg-slate-700 border border-slate-600 p-4 rounded-lg text-left hover:bg-slate-600 transition-colors"
+                >
+                  <span className="text-slate-400 text-[10px] font-bold uppercase block mb-2">
+                    GEMINI
+                  </span>
+                  <p className="text-slate-200 text-sm">{aiOptions.copilot}</p>
+                </button>
+              </div>
+            )}
           </div>
+
+          <label className="block text-xs font-bold text-slate-500 uppercase mt-4 mb-1">
+            Diagnóstico Final
+          </label>
+          <textarea
+            className="w-full bg-white border-2 border-teal-500 rounded-lg p-4 text-sm focus:ring-2 focus:ring-teal-200 outline-none h-32 mb-6"
+            value={neuroAssessment.diagnosis || ""}
+            onChange={(e) =>
+              setNeuroAssessment({
+                ...neuroAssessment,
+                diagnosis: e.target.value,
+              })
+            }
+          />
+
+          <button
+            onClick={saveFullNeuro}
+            className="w-full py-4 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-colors shadow-lg shadow-teal-900/20"
+          >
+            <Save size={20} />
+            Guardar Evaluación Global
+          </button>
         </Accordion>
 
-        {/* Espaciado final */}
-        <div className="h-20" />
+        <div className="h-24" />
       </div>
+
+      {/* MODALS FOR TESTS */}
+      {activeTest === "MOTOR" && (
+        <MotorAssessmentForm
+          visible={true}
+          onClose={() => setActiveTest(null)}
+          initialData={neuroAssessment.uhdrs_motor_info}
+          onSave={(scores: any, total: number) =>
+            handleSaveTest("MOTOR", scores, total)
+          }
+        />
+      )}
+      {activeTest === "MMSE" && (
+        <MMSEForm
+          visible={true}
+          onClose={() => setActiveTest(null)}
+          initialData={neuroAssessment.mmse_info}
+          onSave={(scores: any, total: number) =>
+            handleSaveTest("MMSE", scores, total)
+          }
+        />
+      )}
+      {activeTest === "PBA" && (
+        <PBAForm
+          visible={true}
+          onClose={() => setActiveTest(null)}
+          initialData={neuroAssessment.pba_info}
+          onSave={(scores: any, total: number) =>
+            handleSaveTest("PBA", scores, total)
+          }
+        />
+      )}
+      {activeTest === "FC" && (
+        <FCForm
+          visible={true}
+          onClose={() => setActiveTest(null)}
+          initialData={neuroAssessment.fc_info}
+          onSave={(scores: any, total: number) =>
+            handleSaveTest("FC", scores, total)
+          }
+        />
+      )}
 
       {/* MODAL SOLICITUD LAB */}
       {showLabOrder && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-4 sm:items-center">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-            <h3 className="mb-4 text-xl font-bold text-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-lg p-6 shadow-2xl">
+            <h3 className="text-xl font-bold text-slate-800 mb-6">
               Solicitar Examen de Laboratorio
             </h3>
 
-            <div className="mb-4">
-              <span className="mb-2 block text-xs font-bold text-slate-500">
-                Tipo de Examen
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {LAB_TYPES.map((type) => (
-                  <button
-                    key={type}
-                    onClick={() => setNewLabType(type)}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                      newLabType === type
-                        ? "border-violet-600 bg-violet-50 text-violet-700"
-                        : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
-                    }`}
-                  >
-                    {type}
-                  </button>
-                ))}
-              </div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+              Tipo de Examen
+            </label>
+            <div className="flex flex-wrap gap-2 mb-6">
+              {LAB_TYPES.map((type) => (
+                <button
+                  key={type}
+                  onClick={() => setNewLabType(type)}
+                  className={`px-3 py-1.5 rounded-full border text-xs font-medium transition-colors ${
+                    newLabType === type
+                      ? "bg-violet-100 border-violet-600 text-violet-700 font-bold"
+                      : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+                  }`}
+                >
+                  {type}
+                </button>
+              ))}
             </div>
 
-            <div className="mb-6">
-              <span className="mb-2 block text-xs font-bold text-slate-500">
-                Descripción / Indicaciones
-              </span>
-              <textarea
-                className="w-full rounded-lg border border-slate-300 bg-slate-50 p-3 text-sm focus:border-violet-500 focus:outline-none"
-                rows={3}
-                placeholder="Ej: Hemograma completo, descartar anemia..."
-                value={newLabDesc}
-                onChange={(e) => setNewLabDesc(e.target.value)}
-              />
-            </div>
+            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">
+              Descripción
+            </label>
+            <textarea
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-violet-500 outline-none h-24 mb-6"
+              placeholder="Ej: Hemograma completo..."
+              value={newLabDesc}
+              onChange={(e) => setNewLabDesc(e.target.value)}
+            />
 
             <div className="flex gap-3">
               <button
                 onClick={() => setShowLabOrder(false)}
-                className="flex-1 rounded-xl bg-slate-100 px-4 py-3 font-bold text-slate-600 hover:bg-slate-200"
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-colors"
               >
                 Cancelar
               </button>
               <button
                 onClick={requestLabTest}
                 disabled={orderingLab}
-                className="flex-1 rounded-xl bg-violet-600 px-4 py-3 font-bold text-white hover:bg-violet-700 disabled:opacity-50"
+                className="flex-1 py-3 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl transition-colors disabled:opacity-50"
               >
-                {orderingLab ? "Enviando..." : "Confirmar Solicitud"}
+                {orderingLab ? "Enviando..." : "Confirmar"}
               </button>
             </div>
           </div>

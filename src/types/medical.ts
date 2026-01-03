@@ -12,25 +12,48 @@ export interface PatientProfile {
     avatar_url?: string;
     phone?: string;
     dni?: string;
+    birthday?: string;
+    email?: string;
 }
 
 export interface LabResult {
     id: string;
+    case_id: string;
     type: string; // 'sangre', 'genetico', etc.
     description: string;
     results_json: Record<string, any>; // Tu JSON dinámico
     result_text: string; // La síntesis
     analyzed_at: string;
     status: boolean;
+    created_at?: string;
 }
 
 export interface NeurologyAssessment {
-    id?: string; // Opcional porque puede no existir aún
+    id?: string;
+    case_id?: string;
+    doctor_id?: string;
+
+    // Motor Symptoms (Booleans)
     has_chorea: boolean;
-    uhdrs_motor_score: string | number; // String en input, number en DB
-    mmse_score: string | number;
-    clinical_notes: string;
-    diagnosis: string; // Nuevo campo
+    has_dystonia: boolean;
+    has_bradykinesia: boolean;
+
+    // Scores
+    uhdrs_motor_score?: number | string; // 0-124
+    mmse_score?: number | string; // 0-35
+    pba_score?: number | string;
+    fc_score?: number | string;
+
+    // JSON Details
+    uhdrs_motor_info?: Record<string, any>;
+    mmse_info?: Record<string, any>;
+    pba_info?: Record<string, any>;
+    fc_info?: Record<string, any>;
+
+    clinical_notes?: string;
+    diagnosis?: string;
+    genetic_test_ordered?: boolean;
+    created_at?: string;
 }
 
 export interface Appointment {
